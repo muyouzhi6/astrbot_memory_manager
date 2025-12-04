@@ -7,6 +7,7 @@ from typing import List
 from astrbot.api.star import Star, Context
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api import logger, AstrBotConfig, llm_tool
+from astrbot.core.star.star_tools import StarTools
 from astrbot.core.provider.entities import ProviderRequest
 try:
     from openai import AsyncOpenAI
@@ -24,7 +25,7 @@ class Main(Star):
         super().__init__(context)
         self.config = config
         # Use context.get_data_dir() for data persistence
-        self.data_dir = context.get_data_dir()
+        self.data_dir = str(StarTools.get_data_dir("astrbot_memory_manager"))
         self.memory_manager = MemoryManager(context, self.data_dir)
         
         # 启动后台总结任务
@@ -380,6 +381,7 @@ class Main(Star):
 
     @filter.on_astrbot_loaded()
     async def on_start(self, event: AstrMessageEvent):
+        await self.memory_manager.initialize()
         logger.info("[MemoryManager] Plugin started.")
 
     @filter.event_message_type(filter.EventMessageType.ALL)

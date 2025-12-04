@@ -61,6 +61,7 @@ class SessionMemory:
 class MemoryManager:
     def __init__(self, context: Context, data_path: str):
         self.context = context
+        self.data_path = data_path
         self.base_data_path = os.path.join(data_path, "memories")
         if not os.path.exists(self.base_data_path):
             os.makedirs(self.base_data_path, exist_ok=True)
@@ -71,14 +72,20 @@ class MemoryManager:
         
         self.active_sessions: Dict[str, SessionMemory] = {}
         self.known_session_ids: Set[str] = self._scan_session_files()
-        self._migrate_legacy_data(data_path)
         
         # Start background flush task
         self.flush_task = asyncio.create_task(self._background_flush_worker())
         
-        # Init tiktoken encoder
+        self.encoder = None
+
+    async def initialize(self):
+        """Async initialization"""
+        await self._migrate_legacy_data(self.data_path)
+        
+        # Init tiktoken encoder in executor to avoid blocking
         try:
-            self.encoder = tiktoken.get_encoding("cl100k_base")
+            loop = asyncio.get_running_loop()
+            self.encoder = await loop.run_in_executor(None, tiktoken.get_encoding, "cl100k_base")
         except Exception as e:
             logger.warning(f"[MemoryManager] Failed to load tiktoken encoding: {e}. Fallback to char estimation.")
             self.encoder = None
@@ -136,7 +143,7 @@ class MemoryManager:
     def _get_lock(self, session_id: str) -> asyncio.Lock:
         return self.session_locks[session_id]
 
-    def _migrate_legacy_data(self, old_data_path: str):
+    async def _migrate_legacy_data(self, old_data_path: str):
         v2_file = os.path.join(old_data_path, "memory_data_v2.json")
         v1_file = os.path.join(old_data_path, "memory_data.json")
         
@@ -149,25 +156,30 @@ class MemoryManager:
         if source_file:
             logger.info(f"[MemoryManager] Migrating data from {source_file} to new structure...")
             try:
-                with open(source_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    
-                if source_file == v1_file:
-                    sid = "default"
-                    sm = SessionMemory.from_dict(data)
-                    sm.session_id = sid
-                    self._save_session_sync(sm)
-                    self.known_session_ids.add(sid)
-                else:
-                    for sid, sdata in data.items():
-                        sm = SessionMemory.from_dict(sdata)
-                        self._save_session_sync(sm)
-                        self.known_session_ids.add(sid)
-                
-                os.rename(source_file, source_file + ".bak")
+                # Run sync IO in executor
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, self._do_migration_sync, source_file, v1_file)
                 logger.info("[MemoryManager] Migration completed.")
             except Exception as e:
                 logger.error(f"[MemoryManager] Migration failed: {e}")
+
+    def _do_migration_sync(self, source_file, v1_file):
+        with open(source_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        if source_file == v1_file:
+            sid = "default"
+            sm = SessionMemory.from_dict(data)
+            sm.session_id = sid
+            self._save_session_sync(sm)
+            self.known_session_ids.add(sid)
+        else:
+            for sid, sdata in data.items():
+                sm = SessionMemory.from_dict(sdata)
+                self._save_session_sync(sm)
+                self.known_session_ids.add(sid)
+        
+        shutil.move(source_file, source_file + ".bak")
 
     def _save_session_sync(self, session: SessionMemory):
         file_path = self._get_file_path(session.session_id)
