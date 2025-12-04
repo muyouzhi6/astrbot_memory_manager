@@ -2,6 +2,7 @@ import asyncio
 import os
 import time
 import json
+import pathlib
 from typing import List
 
 from astrbot.api.star import Star, Context
@@ -25,8 +26,9 @@ class Main(Star):
         super().__init__(context)
         self.config = config
         # Use context.get_data_dir() for data persistence
-        self.data_dir = str(StarTools.get_data_dir("astrbot_memory_manager"))
-        self.memory_manager = MemoryManager(context, self.data_dir)
+        # Use pathlib.Path for consistent path handling
+        self.data_dir = StarTools.get_data_dir("astrbot_memory_manager")
+        self.memory_manager = MemoryManager(context, str(self.data_dir))
         
         # 启动后台总结任务
         self.summary_task = asyncio.create_task(self._summary_worker())
@@ -75,12 +77,25 @@ class Main(Star):
                     return content if content is not None else ""
                 
                 # 2. Use AstrBot Default Provider
+                # Try to get the provider currently used by the session if possible, otherwise fallback
+                provider = None
+                
+                # Attempt to get a default provider or the first available one
+                # Since we don't have session info here easily, we get all providers
                 providers = self.context.get_all_providers()
                 if not providers:
                     logger.warning("[MemoryManager] No AstrBot LLM provider available.")
                     return ""
                 
+                # Prefer OpenAI provider if available, as it's likely more stable for this task
                 provider = providers[0]
+                for p in providers:
+                    # Safe access to 'id' attribute
+                    pid = getattr(p, "id", "")
+                    if "openai" in str(pid).lower():
+                        provider = p
+                        break
+
                 response = await provider.text_chat(prompt=prompt, session=None) # type: ignore
                 if response and response.completion_text:
                     return response.completion_text
@@ -224,7 +239,7 @@ class Main(Star):
 
         # 5. Commit or Rollback (Atomic Step 2)
         if summary:
-            await self.memory_manager.commit_pending(session_id, summary)
+            await self.memory_manager.commit_pending(session_id, summary, messages_to_summarize)
             logger.info(f"[MemoryManager] Session {session_id}: Summary committed. Processed {len(messages_to_summarize)} messages.")
             
             # Process Structured Info
@@ -245,7 +260,7 @@ class Main(Star):
                     logger.info(f"[MemoryManager] Session {session_id}: Summary count {len(current_summaries)} >= {threshold}. Triggering archive.")
                     asyncio.create_task(self.archive_summaries(session_id))
         else:
-            await self.memory_manager.rollback_pending(session_id)
+            await self.memory_manager.rollback_pending(session_id, messages_to_summarize)
             logger.warning(f"[MemoryManager] Session {session_id}: Summary failed (empty response), rolled back.")
 
     async def archive_summaries(self, session_id: str):
@@ -423,7 +438,7 @@ class Main(Star):
             current_tokens = 0
             for s in reversed(all_summaries):
                 content = s.get("content", "") if isinstance(s, dict) else str(s)
-                tokens = self.memory_manager.count_tokens(content)
+                tokens = await self.memory_manager.count_tokens(content)
                 if current_tokens + tokens > max_tokens:
                     break
                 summaries.insert(0, s)
@@ -609,17 +624,18 @@ class Main(Star):
             data = session.to_dict()
             try:
                 # Create export directory if not exists
-                export_dir = os.path.join(self.data_dir, "exports")
-                if not os.path.exists(export_dir):
-                    os.makedirs(export_dir, exist_ok=True)
+                export_dir = pathlib.Path(self.data_dir) / "exports"
+                export_dir.mkdir(parents=True, exist_ok=True)
                 
                 # Sanitize filename
                 safe_sid = session_id.replace(":", "_")
                 filename = f"memory_export_{safe_sid}_{int(time.time())}.json"
-                filepath = os.path.join(export_dir, filename)
+                filepath = export_dir / filename
                 
                 # Security check: ensure filepath is within export_dir
-                if not os.path.abspath(filepath).startswith(os.path.abspath(export_dir)):
+                try:
+                    filepath.relative_to(export_dir)
+                except ValueError:
                      yield event.plain_result("导出失败: 非法的文件路径。")
                      return
 

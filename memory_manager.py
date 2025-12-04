@@ -50,12 +50,12 @@ class SessionMemory:
     def from_dict(cls, data: Dict[str, Any]):
         return cls(
             session_id=data.get("session_id", "unknown"),
-            buffer=data.get("buffer", []),
-            pending_buffer=data.get("pending_buffer", []),
-            daily_summaries=data.get("daily_summaries", []),
-            long_term_memory=data.get("long_term_memory", []),
-            important_info=data.get("important_info", []),
-            structured_data=data.get("structured_data", {})
+            buffer=list(data.get("buffer") or []),
+            pending_buffer=list(data.get("pending_buffer") or []),
+            daily_summaries=list(data.get("daily_summaries") or []),
+            long_term_memory=list(data.get("long_term_memory") or []),
+            important_info=list(data.get("important_info") or []),
+            structured_data=dict(data.get("structured_data") or {})
         )
 
 class MemoryManager:
@@ -90,14 +90,20 @@ class MemoryManager:
             logger.warning(f"[MemoryManager] Failed to load tiktoken encoding: {e}. Fallback to char estimation.")
             self.encoder = None
 
-    def count_tokens(self, text: str) -> int:
+    async def count_tokens(self, text: str) -> int:
         if not text:
             return 0
         if self.encoder:
             try:
-                return len(self.encoder.encode(text))
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(None, self._count_tokens_sync, text)
             except Exception:
                 return len(text)
+        return len(text)
+
+    def _count_tokens_sync(self, text: str) -> int:
+        if self.encoder:
+            return len(self.encoder.encode(text))
         return len(text)
 
     async def _background_flush_worker(self):
@@ -255,13 +261,18 @@ class MemoryManager:
             await self.save_session(session) # Critical operation, force save
             return messages
 
-    async def commit_pending(self, session_id: str, summary: str, date_str: Optional[str] = None):
+    async def commit_pending(self, session_id: str, summary: str, messages: List[Dict[str, Any]], date_str: Optional[str] = None):
         if date_str is None:
             date_str = time.strftime("%Y-%m-%d", time.localtime())
             
         async with self._get_lock(session_id):
             session = await self.get_session(session_id)
-            session.pending_buffer = []
+            
+            # Only remove the messages that were actually summarized
+            # Using object identity for robust removal even in concurrent scenarios
+            target_ids = {id(m) for m in messages}
+            session.pending_buffer = [m for m in session.pending_buffer if id(m) not in target_ids]
+            
             session.daily_summaries.append({
                 "date": date_str,
                 "content": summary,
@@ -270,12 +281,19 @@ class MemoryManager:
             session.mark_dirty()
             await self.save_session(session) # Critical
 
-    async def rollback_pending(self, session_id: str):
+    async def rollback_pending(self, session_id: str, messages: List[Dict[str, Any]]):
         async with self._get_lock(session_id):
             session = await self.get_session(session_id)
-            if session.pending_buffer:
-                session.buffer = session.pending_buffer + session.buffer
-                session.pending_buffer = []
+            
+            if messages:
+                # Remove from pending
+                target_ids = {id(m) for m in messages}
+                session.pending_buffer = [m for m in session.pending_buffer if id(m) not in target_ids]
+                
+                # Add back to buffer (prepend to maintain chronological order roughly)
+                # NOTE: If strict order is needed, we might need to sort buffer by timestamp
+                session.buffer = messages + session.buffer
+                
                 session.mark_dirty()
                 await self.save_session(session) # Critical
 
