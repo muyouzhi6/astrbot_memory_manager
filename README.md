@@ -15,34 +15,6 @@
 
 本插件的设计灵感来源于人类的记忆形成机制：**短期记忆缓冲** -> **工作记忆加工 (摘要)** -> **长期记忆固化 (归档)**。
 
-```mermaid
-graph TD
-    Input[用户消息] --> Buffer[⚡ 短期缓冲 (Buffer)]
-    
-    subgraph "阶段一：自动总结 (Auto Summary)"
-        Buffer -- "消息量 >= m (trigger_threshold)" --> Trigger{触发总结?}
-        Trigger -- Yes --> Split[切分数据]
-        Split -- "保留最近 n 条 (reserve_count)" --> Keep[保留区 (保持对话连贯)]
-        Split -- "提取旧消息 (m-n)" --> Pending[⏳ 待处理区 (Pending)]
-        Pending -- "LLM 处理" --> LLM_Sum[生成摘要 & 提取结构化信息]
-        LLM_Sum --> Commit[✅ 存入每日摘要列表]
-    end
-    
-    subgraph "阶段二：记忆注入 (Injection)"
-        Commit -.-> Inject[💉 上下文注入]
-        Struct[📊 结构化信息] -.-> Inject
-        Important[⭐ 重要事项] -.-> Inject
-        Inject -- "System Prompt" --> Reply[Bot 回复用户]
-    end
-    
-    subgraph "阶段三：每日归档 (Daily Archive)"
-        Clock[🕒 每日定时 (03:00)] --> ForceSum[强制总结剩余 Buffer]
-        ForceSum --> DailyRecap[生成昨日日报]
-        DailyRecap --> CheckExp{摘要过期/过多?}
-        CheckExp -- Yes --> Compress[🗜️ 压缩合并]
-        Compress --> LongTerm[💾 长期记忆存储]
-    end
-```
 
 ### 核心概念解释
 
@@ -160,3 +132,4 @@ Bot 会优先遵循这里的内容，适合存如"群规"、"用户称呼"、"�
 
 **Author**: [木有知](https://github.com/muyouzhi6)
 **Repo**: [https://github.com/muyouzhi6/astrbot_memory_manager](https://github.com/muyouzhi6/astrbot_memory_manager)
+
