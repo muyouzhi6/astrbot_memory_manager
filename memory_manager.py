@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Set
 from collections import defaultdict
 from astrbot.api import logger
-from astrbot.core.star import Context
+from astrbot.api.star import Context
 
 @dataclass
 class SessionMemory:

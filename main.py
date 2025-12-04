@@ -8,6 +8,14 @@ from astrbot.api.star import Star, Context
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api import logger, AstrBotConfig, llm_tool
 from astrbot.core.provider.entities import ProviderRequest
+try:
+    from openai import AsyncOpenAI
+except ImportError:
+    AsyncOpenAI = None
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+except ImportError:
+    AsyncIOScheduler = None
 
 from .memory_manager import MemoryManager
 
@@ -15,8 +23,9 @@ class Main(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
-        plugin_dir = os.path.dirname(__file__)
-        self.memory_manager = MemoryManager(context, plugin_dir)
+        # Use context.get_data_dir() for data persistence
+        self.data_dir = context.get_data_dir()
+        self.memory_manager = MemoryManager(context, self.data_dir)
         
         # 启动后台总结任务
         self.summary_task = asyncio.create_task(self._summary_worker())
@@ -36,11 +45,13 @@ class Main(Star):
         api_key = self.config.get("llm_api_key")
         
         if api_base and api_key:
-            try:
-                from openai import AsyncOpenAI
-                self.llm_client = AsyncOpenAI(api_key=api_key, base_url=api_base)
-                logger.info(f"[MemoryManager] Custom LLM client initialized with base: {api_base}")
-            except ImportError:
+            if AsyncOpenAI:
+                try:
+                    self.llm_client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+                    logger.info(f"[MemoryManager] Custom LLM client initialized with base: {api_base}")
+                except Exception as e:
+                    logger.error(f"[MemoryManager] Failed to initialize Custom LLM client: {e}")
+            else:
                 logger.error("[MemoryManager] openai package not found. Please install it to use custom LLM.")
         else:
             logger.info("[MemoryManager] No custom LLM config found, will use AstrBot default provider.")
@@ -94,13 +105,12 @@ class Main(Star):
             logger.error(f"[MemoryManager] Invalid archive_time format: {archive_time}, using default 03:00")
             hour, minute = 3, 0
 
-        try:
-            from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        if AsyncIOScheduler:
             self.scheduler = AsyncIOScheduler()
             self.scheduler.add_job(self._daily_archive, 'cron', hour=hour, minute=minute)
             self.scheduler.start()
             logger.info(f"[MemoryManager] Daily archive scheduled at {hour:02d}:{minute:02d}")
-        except ImportError:
+        else:
             logger.warning("[MemoryManager] apscheduler not found, daily archive disabled.")
             self.scheduler = None
 
@@ -219,7 +229,6 @@ class Main(Star):
             # Process Structured Info
             if structured_info_str:
                 try:
-                    import json
                     structured_info = json.loads(structured_info_str)
                     if structured_info:
                         await self.memory_manager.update_structured_data(session_id, structured_info)
@@ -284,7 +293,6 @@ class Main(Star):
             
             # 2. Generate Daily Recap (New V2 Feature)
             # Get summaries from the last 24 hours
-            import time
             yesterday_start = time.time() - 86400
             session = await self.memory_manager.get_session(session_id)
             daily_summaries_to_recap = [
@@ -425,7 +433,6 @@ class Main(Star):
         memory_parts = []
         
         if structured_data:
-            import json
             info_str = json.dumps(structured_data, ensure_ascii=False)
             memory_parts.append(f"【用户画像/结构化信息】\n{info_str}")
 
@@ -442,8 +449,8 @@ class Main(Star):
             current_sys_prompt = req.system_prompt or ""
             req.system_prompt = current_sys_prompt + system_prompt_appendix
 
-    @llm_tool("search_chat_history")
-    async def search_chat_history(self, event: AstrMessageEvent, keywords: str, days: int = 30) -> str:
+    @llm_tool(name="search_chat_history")
+    async def search_chat_history(self, event: AstrMessageEvent, keywords: str, days: int = 30):
         """
         当默认提供的对话摘要信息不足以回答用户问题，或者用户明确询问过去的某个具体事件时，使用此工具搜索历史记忆。
         此工具会搜索所有的每日总结、长期记忆和重要事项。
@@ -545,15 +552,18 @@ class Main(Star):
                 return
             key = args[0]
             value = " ".join(args[1:])
-            await self.memory_manager.update_structured_data(session_id, {key: value})
-            yield event.plain_result(f"已更新结构化信息: {key} = {value}")
+            try:
+                await self.memory_manager.update_structured_data(session_id, {key: value})
+                yield event.plain_result(f"已更新结构化信息: {key} = {value}")
+            except Exception as e:
+                logger.error(f"[MemoryManager] Failed to update structured data: {e}")
+                yield event.plain_result("更新失败，请稍后重试。")
 
         elif action == "view_form":
             data = await self.memory_manager.get_structured_data(session_id)
             if not data:
                 yield event.plain_result("暂无结构化信息。")
             else:
-                import json
                 text = "【结构化信息】\n" + json.dumps(data, ensure_ascii=False, indent=2)
                 yield event.plain_result(text)
 
@@ -563,34 +573,41 @@ class Main(Star):
             
         elif action == "force_summary":
             yield event.plain_result("正在执行强制总结（包含保留区消息）...")
-            await self.perform_summary(session_id, force=True)
-            yield event.plain_result("总结执行完毕。")
+            try:
+                await self.perform_summary(session_id, force=True)
+                yield event.plain_result("总结执行完毕。")
+            except Exception as e:
+                logger.error(f"[MemoryManager] Force summary failed: {e}")
+                yield event.plain_result(f"总结执行失败: {e}")
 
         elif action == "stats":
-            buffer_size = await self.memory_manager.get_buffer_size(session_id)
-            session = await self.memory_manager.get_session(session_id)
-            pending_size = len(session.pending_buffer)
-            summary_count = len(session.daily_summaries)
-            long_term_count = len(session.long_term_memory)
-            max_buffer = self.config.get("max_buffer_size", 1000)
-            
-            stats_text = (
-                "【记忆统计】\n"
-                f"Session ID: {session_id}\n"
-                f"Buffer Size: {buffer_size} / {max_buffer}\n"
-                f"Pending Buffer: {pending_size}\n"
-                f"Daily Summaries: {summary_count}\n"
-                f"Long Term Memories: {long_term_count}"
-            )
-            yield event.plain_result(stats_text)
+            try:
+                buffer_size = await self.memory_manager.get_buffer_size(session_id)
+                session = await self.memory_manager.get_session(session_id)
+                pending_size = len(session.pending_buffer)
+                summary_count = len(session.daily_summaries)
+                long_term_count = len(session.long_term_memory)
+                max_buffer = self.config.get("max_buffer_size", 1000)
+                
+                stats_text = (
+                    "【记忆统计】\n"
+                    f"Session ID: {session_id}\n"
+                    f"Buffer Size: {buffer_size} / {max_buffer}\n"
+                    f"Pending Buffer: {pending_size}\n"
+                    f"Daily Summaries: {summary_count}\n"
+                    f"Long Term Memories: {long_term_count}"
+                )
+                yield event.plain_result(stats_text)
+            except Exception as e:
+                logger.error(f"[MemoryManager] Stats error: {e}")
+                yield event.plain_result(f"获取统计信息失败: {e}")
 
         elif action == "export":
             session = await self.memory_manager.get_session(session_id)
             data = session.to_dict()
-            import json
             try:
                 # Create export directory if not exists
-                export_dir = os.path.join(os.path.dirname(__file__), "exports")
+                export_dir = os.path.join(self.data_dir, "exports")
                 if not os.path.exists(export_dir):
                     os.makedirs(export_dir, exist_ok=True)
                 
@@ -607,7 +624,7 @@ class Main(Star):
                 with open(filepath, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=4)
                     
-                yield event.plain_result(f"记忆已导出到插件目录: exports/{filename}\n(由于安全限制，请联系管理员在服务器获取文件)")
+                yield event.plain_result(f"记忆已导出到数据目录: exports/{filename}\n(由于安全限制，请联系管理员在服务器获取文件)")
             except Exception as e:
                 yield event.plain_result(f"导出失败: {e}")
             
