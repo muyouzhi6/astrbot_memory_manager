@@ -7,7 +7,7 @@
 [![AstrBot Plugin](https://img.shields.io/badge/AstrBot-Plugin-purple?style=flat-square)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
-**AstrBot Memory Manager** 是一个专家级的记忆管理插件，旨在解决传统 LLM 机器人"聊完就忘"、"上下文有限"的痛点。它像人类的海马体一样，在后台默默地将海量的聊天记录转化为精炼的摘要、结构化的知识和永久的长期记忆。
+**AstrBot Memory Manager** 是一个专家级的记忆管理插件，旨在解决传统 LLM 机器人"聊完就忘"、"上下文有限"的痛点。它像人类的海马体一样，在后台默默地将海量的聊天记录转化为精炼的摘要、结构化的知识和长期记忆。
 
 ---
 
@@ -132,4 +132,5 @@ Bot 会优先遵循这里的内容，适合存如"群规"、"用户称呼"、"�
 
 **Author**: [木有知](https://github.com/muyouzhi6)
 **Repo**: [https://github.com/muyouzhi6/astrbot_memory_manager](https://github.com/muyouzhi6/astrbot_memory_manager)
+
 
