@@ -1,0 +1,101 @@
+{
+  "trigger_threshold": {
+    "description": "触发总结的消息数量阈值 (m)。当缓冲区消息达到此数量时触发自动总结。",
+    "type": "int",
+    "default": 50,
+    "min": 5,
+    "max": 500
+  },
+  "max_buffer_size": {
+    "description": "最大缓冲消息数量。超过此限制将触发紧急截断策略（保留最近100条）。",
+    "type": "int",
+    "default": 1000,
+    "min": 100,
+    "max": 10000
+  },
+  "max_injection_tokens": {
+    "description": "记忆注入的最大 Token 数量（约等于字符数）。超过此限制的旧记忆将被截断。",
+    "type": "int",
+    "default": 2000,
+    "min": 500,
+    "max": 10000
+  },
+  "reserve_count": {
+    "description": "总结后保留在缓冲区的最近消息数量 (n)。总结将针对前 (总数-n) 条消息进行。",
+    "type": "int",
+    "default": 10,
+    "min": 0,
+    "max": 100
+  },
+  "archive_time": {
+    "description": "每日整理任务的执行时间 (HH:MM)。",
+    "type": "string",
+    "default": "03:00"
+  },
+  "max_retention_days": {
+    "description": "每日摘要保留的最大天数。超过此时间的记录将被清理或归档。",
+    "type": "int",
+    "default": 30,
+    "min": 1,
+    "max": 365
+  },
+  "custom_short_term_prompt": {
+    "description": "自定义短期总结提示词。使用 {text} 占位符代表对话内容。留空则使用默认提示词。",
+    "type": "string",
+    "default": ""
+  },
+  "custom_long_term_prompt": {
+    "description": "自定义长期记忆归档提示词。使用 {text} 代表每日摘要集合，{date_range} 代表日期范围。留空则使用默认提示词。",
+    "type": "string",
+    "default": ""
+  },
+  "llm_api_base": {
+    "description": "LLM API Base URL (例如: https://api.openai.com/v1)。如果不配置，将尝试使用 AstrBot 默认 Provider。",
+    "type": "string",
+    "default": ""
+  },
+  "llm_api_key": {
+    "description": "LLM API Key。如果配置了 llm_api_base，此项必填。",
+    "type": "string",
+    "default": ""
+  },
+  "llm_model_name": {
+    "description": "LLM 模型名称 (例如: gpt-3.5-turbo, gpt-4)。如果配置了 llm_api_base，此项必填。",
+    "type": "string",
+    "default": ""
+  },
+  "injection_count": {
+    "description": "向 LLM 注入的最近摘要数量。",
+    "type": "int",
+    "default": 3,
+    "min": 1,
+    "max": 20
+  },
+  "enable_auto_summary": {
+    "description": "是否启用自动总结功能。",
+    "type": "bool",
+    "default": true
+  },
+  "inject_all_summaries": {
+    "description": "是否向 LLM 注入所有短期摘要 (Daily Summaries)。如果启用，将忽略 injection_count。注意：这可能会消耗较多的 Token。",
+    "type": "bool",
+    "default": false
+  },
+  "daily_summary_threshold": {
+    "description": "短期摘要数量阈值。当每日摘要数量达到此值时，将触发自动归档（合并为长期记忆）。设为 0 表示禁用此功能。",
+    "type": "int",
+    "default": 20,
+    "min": 0,
+    "max": 100
+  },
+  "enable_structured_extraction": {
+    "description": "是否启用结构化信息（用户画像、关系等）自动提取功能。",
+    "type": "bool",
+    "default": true
+  },
+  "structured_extraction_schema": {
+    "description": "结构化提取的 Schema 定义（JSON 格式字符串）。留空则使用默认 Schema（昵称、位置、偏好等）。",
+    "type": "string",
+    "default": ""
+  }
+}

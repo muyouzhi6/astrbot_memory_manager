@@ -1,0 +1,4 @@
+apscheduler
+aiofiles
+openai>=1.0.0
+tiktoken>=0.7.0
