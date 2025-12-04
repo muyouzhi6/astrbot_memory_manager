@@ -123,7 +123,6 @@ Bot 会优先遵循这里的内容，适合存如"群规"、"用户称呼"、"�
 
 ## 📂 数据存储
 
-插件数据存储在 `data/plugins/astrbot_memory_manager/memories/` 目录下。
 *   每个会话（群聊/私聊）对应一个 `.json` 文件。
 *   文件名为处理过的 Session ID（冒号被替换为 `_COLON_`）。
 *   支持热迁移：直接备份或替换 json 文件即可。
@@ -132,5 +131,6 @@ Bot 会优先遵循这里的内容，适合存如"群规"、"用户称呼"、"�
 
 **Author**: [木有知](https://github.com/muyouzhi6)
 **Repo**: [https://github.com/muyouzhi6/astrbot_memory_manager](https://github.com/muyouzhi6/astrbot_memory_manager)
+
 
 
